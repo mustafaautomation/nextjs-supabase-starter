@@ -24,7 +24,7 @@ test('a wrong password shows one generic error and keeps you signed out', async 
   await page.getByLabel('Email').fill(account.email);
   await page.getByLabel('Password').fill('definitely-wrong');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await expect(page.getByRole('alert')).toHaveText('Email or password is incorrect.');
+  await expect(page.getByRole('main').getByRole('alert')).toHaveText('Email or password is incorrect.');
   await expect(page).toHaveURL(/\/login/);
 
   await page.goto('/notes');
@@ -48,7 +48,7 @@ test('signing up twice with the same email is refused', async ({ page, browser }
   await other.getByLabel('Email').fill(account.email);
   await other.getByLabel('Password').fill(account.password + 'x');
   await other.getByRole('button', { name: 'Create account' }).click();
-  await expect(other.getByRole('alert')).toBeVisible();
+  await expect(other.getByRole('main').getByRole('alert')).toHaveText('User already registered');
   await expect(other).toHaveURL(/\/signup$/);
   await other.close();
 });

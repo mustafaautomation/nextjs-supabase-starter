@@ -65,7 +65,15 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - name: Playwright E2E + axe (headless Chromium)
-        run: npm run test:e2e
+        run: |
+          set -o pipefail
+          npm run test:e2e 2>&1 | tee e2e.log
+      - name: Fail if the server logged errors during the E2E run
+        run: |
+          if grep -n '\[WebServer\].*Error' e2e.log; then
+            echo "::error::next start logged errors while the E2E tests ran"
+            exit 1
+          fi
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
