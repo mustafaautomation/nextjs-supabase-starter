@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Format, lint, types, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build (placeholder public env; nothing is called at build time)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: build-placeholder
+
+  e2e:
+    name: Local Supabase stack - RLS tests and Playwright E2E + axe
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 2.122.0
+      - name: Start local Supabase (Postgres, Auth, REST, API gateway) and apply migrations
+        run: npm run db:start
+      - name: Lint the database schema
+        run: supabase db lint --level warning --fail-on error
+      - name: Export the local public URL and publishable key
+        run: |
+          eval "$(supabase status -o env)"
+          key="${PUBLISHABLE_KEY:-$ANON_KEY}"
+          test -n "$API_URL" && test -n "$key"
+          echo "::add-mask::$key"
+          echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL" >> "$GITHUB_ENV"
+          echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$key" >> "$GITHUB_ENV"
+      - name: RLS tests through the public API (no service-role key)
+        run: npm run test:rls
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Playwright E2E + axe (headless Chromium)
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 7
+      - name: Supabase logs on failure
+        if: failure()
+        run: docker ps -a && docker logs $(docker ps -aqf name=supabase_auth) 2>&1 | tail -50 || true
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz gitleaks
+          ./gitleaks git --redact --verbose --exit-code 1 .
